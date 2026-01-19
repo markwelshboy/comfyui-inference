@@ -1,80 +1,54 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# -----------------------------------------------------------------------------
-# build_comfy_infer.sh — buildx builder for ComfyUI inference container
-#
-# Usage:
-#   ./build_comfy_infer.sh                 # builds & pushes :latest (default)
-#
-# Options:
-#   --no-push              Do not push (default: push)
-#   --load                 Load into local docker (implies --no-push)
-#   --platform <plats>     Default: linux/amd64
-#   --no-cache             Disable build cache
-#   --prune                Safe-ish prune before build
-#   --prune-hard           Aggressive prune before build (docker system prune -af)
-#
-# Tagging:
-#   --tag <tag>            Override tag (default: latest)
-#
-# Metadata:
-#   --image-version <v>    Default: 0.1.0
-#   --build-date <iso>     Default: now (UTC)
-#   --vcs-ref <sha>        Default: git rev-parse --short HEAD or "unknown"
-#
-# Pins (build args):
-#   --torch <ver>          Default matches constraints.txt
-#   --torchvision <ver>    Default matches constraints.txt
-#   --torch-index <url>    Default: nightly cu128
-#   --comfy-ref <ref>      Default: v0.9.2
-#
-# Pass-through build args:
-#   --build-arg KEY=VALUE  Repeatable
-# -----------------------------------------------------------------------------
-
 usage() {
   cat <<'EOF'
 Usage:
   ./build_comfy_infer.sh [options]
 
 Options:
-  --no-push              Do not push (default is push)
+  --no-push              Do not push (default: push)
   --load                 Load into local docker (implies --no-push)
-  --platform <plats>     Default: linux/amd64 (e.g. linux/amd64,linux/arm64)
+  --platform <plats>     Default: linux/amd64
   --no-cache             Disable build cache
-  --prune                Safe-ish prune (container/image/builder)
-  --prune-hard           Aggressive prune (docker system prune -af)
+  --prune                Safe-ish prune before build
+  --prune-hard           Aggressive prune before build (docker system prune -af)
 
 Tagging:
-  --tag <tag>            Override tag (default: latest)
+  --image <repo/name>    Default: markwelshboy/comfyui-inference
+  --tag <tag>            Default: latest
+
+Target stage:
+  --target <stage>       Build a specific Dockerfile stage (optional).
+                         If omitted, script will prefer 'final' if it exists,
+                         otherwise builds the default final stage with no --target.
 
 Metadata:
   --image-version <v>    Default: 0.1.0
-  --build-date <iso>     Default: now UTC if omitted
+  --build-date <iso>     Default: now UTC
   --vcs-ref <sha>        Default: git rev-parse --short HEAD or "unknown"
-
-Pins:
-  --torch <ver>          Torch version (default pinned nightly)
-  --torchvision <ver>    TorchVision version (default pinned nightly)
-  --torch-index <url>    Torch index URL (default: nightly cu128)
-  --comfy-ref <ref>      ComfyUI git ref/tag/sha (default: v0.9.2)
 
 Pass-through:
   --build-arg KEY=VALUE  Repeatable.
+  --dockerfile <path>    Default: Dockerfile
 
 Examples:
   ./build_comfy_infer.sh
-  ./build_comfy_infer.sh --no-push --load
-  ./build_comfy_infer.sh --tag dev --no-push
-  ./build_comfy_infer.sh --prune --torch 2.10.0.dev20251114+cu128 --torchvision 0.25.0.dev20251118+cu128
+  ./build_comfy_infer.sh --no-push
+  ./build_comfy_infer.sh --load
+  ./build_comfy_infer.sh --target sanity --no-push
+  ./build_comfy_infer.sh --dockerfile Dockerfile.sanity --no-push
 EOF
 }
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
-# Build behavior
+# Defaults
+IMAGE="markwelshboy/comfyui-inference"
+TAG="latest"
+DOCKERFILE="Dockerfile"
+
 PUSH=true
 LOAD=false
 PLATFORM="linux/amd64"
@@ -82,24 +56,15 @@ NO_CACHE=false
 PRUNE=false
 PRUNE_HARD=false
 
-# Image/tag (default :latest)
-IMAGE="markwelshboy/comfyui-inference"
-TAG="latest"
+TARGET=""
 
-# Metadata
 IMAGE_VERSION="0.1.0"
 BUILD_DATE=""
 VCS_REF=""
 
-# Pins (defaults must match constraints.txt)
-TORCH_INDEX="https://download.pytorch.org/whl/nightly/cu128"
-TORCH_VER="2.10.0.dev20251114+cu128"
-TORCHVISION_VER="0.25.0.dev20251118+cu128"
-COMFYUI_REF="v0.9.2"
-
-# Extra args
 EXTRA_BUILD_ARGS=()
 
+# Parse args
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-push) PUSH=false; shift ;;
@@ -108,19 +73,14 @@ while [[ $# -gt 0 ]]; do
     --no-cache) NO_CACHE=true; shift ;;
     --prune) PRUNE=true; shift ;;
     --prune-hard) PRUNE_HARD=true; shift ;;
+    --image) [[ -n "${2:-}" ]] || die "--image requires a value"; IMAGE="$2"; shift 2 ;;
     --tag) [[ -n "${2:-}" ]] || die "--tag requires a value"; TAG="$2"; shift 2 ;;
-
+    --dockerfile) [[ -n "${2:-}" ]] || die "--dockerfile requires a path"; DOCKERFILE="$2"; shift 2 ;;
+    --target) [[ -n "${2:-}" ]] || die "--target requires a stage name"; TARGET="$2"; shift 2 ;;
     --image-version) [[ -n "${2:-}" ]] || die "--image-version requires a value"; IMAGE_VERSION="$2"; shift 2 ;;
     --build-date) [[ -n "${2:-}" ]] || die "--build-date requires a value"; BUILD_DATE="$2"; shift 2 ;;
     --vcs-ref) [[ -n "${2:-}" ]] || die "--vcs-ref requires a value"; VCS_REF="$2"; shift 2 ;;
-
-    --torch) [[ -n "${2:-}" ]] || die "--torch requires a value"; TORCH_VER="$2"; shift 2 ;;
-    --torchvision) [[ -n "${2:-}" ]] || die "--torchvision requires a value"; TORCHVISION_VER="$2"; shift 2 ;;
-    --torch-index) [[ -n "${2:-}" ]] || die "--torch-index requires a value"; TORCH_INDEX="$2"; shift 2 ;;
-    --comfy-ref) [[ -n "${2:-}" ]] || die "--comfy-ref requires a value"; COMFYUI_REF="$2"; shift 2 ;;
-
     --build-arg) [[ -n "${2:-}" ]] || die "--build-arg requires KEY=VALUE"; EXTRA_BUILD_ARGS+=(--build-arg "$2"); shift 2 ;;
-
     -h|--help) usage; exit 0 ;;
     *) die "Unknown argument: $1 (use --help)" ;;
   esac
@@ -129,6 +89,7 @@ done
 have_cmd docker || die "docker not found"
 sudo docker buildx version >/dev/null 2>&1 || die "docker buildx not available"
 
+# Metadata defaults
 if [[ -z "${BUILD_DATE}" ]]; then
   BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 fi
@@ -140,6 +101,34 @@ if [[ -z "${VCS_REF}" ]]; then
   fi
 fi
 
+# If user didn't specify --target, prefer "final" only if it exists.
+# Otherwise, omit --target entirely (build default final stage = last stage).
+detect_target_if_any() {
+  [[ -n "${TARGET}" ]] && return 0
+
+  # Look for stage names in the Dockerfile
+  # e.g. "FROM ... AS final"
+  local stages
+  stages="$(grep -E '^[[:space:]]*FROM[[:space:]].*[[:space:]]+AS[[:space:]]+' "${DOCKERFILE}" \
+    | sed -E 's/.*[[:space:]]+AS[[:space:]]+([A-Za-z0-9_.-]+).*/\1/I' \
+    | tr '\r' '\n' \
+    | tr -d ' ' \
+    || true)"
+
+  # Common preferences (only if present)
+  for cand in final runtime comfy infer; do
+    if echo "${stages}" | grep -qx "${cand}"; then
+      TARGET="${cand}"
+      return 0
+    fi
+  done
+
+  # No target chosen => build last stage (best default)
+  TARGET=""
+}
+
+detect_target_if_any
+
 echo "== Build settings =="
 echo "Image       : ${IMAGE}:${TAG}"
 echo "Platform    : ${PLATFORM}"
@@ -148,16 +137,14 @@ echo "Load        : ${LOAD}"
 echo "No-cache    : ${NO_CACHE}"
 echo "Prune       : ${PRUNE}"
 echo "Prune-hard  : ${PRUNE_HARD}"
+echo "Dockerfile  : ${DOCKERFILE}"
+echo "Target      : ${TARGET:-<default final stage>}"
 echo "Build date  : ${BUILD_DATE}"
 echo "VCS ref     : ${VCS_REF}"
 echo "Version     : ${IMAGE_VERSION}"
-echo "Pins        :"
-echo "  TORCH_INDEX     = ${TORCH_INDEX}"
-echo "  TORCH_VER       = ${TORCH_VER}"
-echo "  TORCHVISION_VER = ${TORCHVISION_VER}"
-echo "  COMFYUI_REF      = ${COMFYUI_REF}"
 echo ""
 
+# Prune logic (optional)
 if $PRUNE_HARD; then
   echo "== Aggressive prune (docker system prune -af) =="
   sudo docker system prune -af || true
@@ -179,18 +166,11 @@ if ! sudo docker buildx inspect >/dev/null 2>&1; then
 fi
 
 common_buildx_args=(
+  -f "${DOCKERFILE}"
   --platform "${PLATFORM}"
-  --target "final"
   --build-arg "BUILD_DATE=${BUILD_DATE}"
   --build-arg "VCS_REF=${VCS_REF}"
   --build-arg "IMAGE_VERSION=${IMAGE_VERSION}"
-  --build-arg "BUILD_GIT_SHA=${VCS_REF}"
-  --build-arg "IMAGE_TAG=${TAG}"
-
-  --build-arg "TORCH_INDEX=${TORCH_INDEX}"
-  --build-arg "TORCH_VER=${TORCH_VER}"
-  --build-arg "TORCHVISION_VER=${TORCHVISION_VER}"
-  --build-arg "COMFYUI_REF=${COMFYUI_REF}"
 )
 
 if $NO_CACHE; then
@@ -203,6 +183,11 @@ elif $LOAD; then
   common_buildx_args+=(--load)
 else
   common_buildx_args+=(--load)
+fi
+
+# Only pass --target if we actually chose one
+if [[ -n "${TARGET}" ]]; then
+  common_buildx_args+=(--target "${TARGET}")
 fi
 
 echo ""

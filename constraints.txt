@@ -1,15 +1,15 @@
-# Keep pip happy with common wheels
+# ---- lock torch stack (installed explicitly, but keep here to force anything else) ----
+torch==2.10.0.dev20251202+cu128
+torchvision==0.25.0.dev20251202+cu128
+torchaudio==2.10.0.dev20251202+cu128
+
+# ---- core numerics ----
 numpy==2.2.6
+scipy>=1.11
 
-# Avoid surprise hf hub major jumps (you already like this)
-huggingface-hub==0.36.0
-
-# Click pin if you still install comfy-cli anywhere
-click<=8.1.8
-
-# Optional: keep opencv/numpy compatibility stable
+# ---- CV ----
 opencv-python-headless==4.12.0.88
+Pillow>=10
 
-# If you use kornia/scipy a lot:
-kornia==0.8.2
-scipy==1.17.0
+# ---- sanity: prevent surprise "new major breaks" ----
+huggingface-hub==0.36.0
