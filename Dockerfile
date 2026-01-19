@@ -29,6 +29,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -U "pip<25.2" setuptools wheel
 
 # ---- Constraints: copy early so ALL subsequent pip installs are constrained ----
+COPY pip.conf /etc/pip.conf
 COPY constraints.txt /opt/constraints.txt
 ENV PIP_CONSTRAINT=/opt/constraints.txt
 # Optional extra enforcement for builds that spawn isolated envs:
