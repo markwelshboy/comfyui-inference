@@ -15,6 +15,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       build-essential gcc g++ cmake ninja-build pkg-config \
       ffmpeg aria2 rsync tmux unzip wget vim less nano \
       libgl1 libglib2.0-0 \
+      gcc-12 g++-12 \
       openssh-server \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \

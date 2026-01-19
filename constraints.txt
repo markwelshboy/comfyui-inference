@@ -1,15 +1,42 @@
-# ---- lock torch stack (installed explicitly, but keep here to force anything else) ----
+# ================================================================
+# Global indexes (critical so custom_nodes inherit the same world)
+# ================================================================
+--index-url https://download.pytorch.org/whl/nightly/cu128
+--extra-index-url https://pypi.org/simple
+
+# ================================================================
+# Lock torch stack (prevent nodes from pulling mismatched builds)
+# ================================================================
 torch==2.10.0.dev20251202+cu128
 torchvision==0.25.0.dev20251202+cu128
 torchaudio==2.10.0.dev20251202+cu128
 
-# ---- core numerics ----
+# ================================================================
+# Core numerics (keep consistent with OpenCV + kornia + friends)
+# ================================================================
 numpy==2.2.6
-scipy>=1.11
+scipy==1.17.0
 
-# ---- CV ----
+# TorchSDE: avoid 0.2.5 invalid metadata with newer pip
+torchsde==0.2.6
+trampoline==0.1.2
+
+# ================================================================
+# CV stack
+# ================================================================
 opencv-python-headless==4.12.0.88
-Pillow>=10
+Pillow==12.1.0
+einops==0.8.1
+kornia==0.8.2
 
-# ---- sanity: prevent surprise "new major breaks" ----
+# ================================================================
+# HF / transformers ecosystem (avoid hub 1.x surprises)
+# ================================================================
 huggingface-hub==0.36.0
+safetensors==0.7.0
+
+# (Optional) If you frequently install nodes that bring transformers/diffusers,
+# pin them too once you confirm versions that work for you:
+# transformers==4.57.6
+# diffusers==0.36.0
+# tokenizers==0.22.2
