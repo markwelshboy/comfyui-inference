@@ -1,0 +1,17 @@
+# constraints.sanity.cpu.txt
+# Keep resolver sane on CPU
+pip<25.2
+
+# Avoid torchaudio (we filter it anyway, but belts+suspenders)
+torchaudio==0
+
+# Keep numpy compatible with opencv/numba common wheels
+numpy>=2,<2.3
+
+# Torch on CPU (let pip pick a compatible stable CPU build)
+torch>=2.6
+torchvision>=0.21
+
+# Fix torchsde metadata issue path (pip rejects torchsde 0.2.5 metadata)
+torchsde==0.2.6
+

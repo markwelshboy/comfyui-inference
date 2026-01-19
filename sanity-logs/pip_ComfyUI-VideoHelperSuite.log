@@ -1,0 +1,13 @@
+Collecting opencv-python (from -r /workspace/run/ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite/requirements.txt (line 1))
+  Downloading opencv_python-4.13.0.90-cp37-abi3-manylinux_2_28_x86_64.whl.metadata (19 kB)
+Collecting imageio-ffmpeg (from -r /workspace/run/ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite/requirements.txt (line 2))
+  Downloading imageio_ffmpeg-0.6.0-py3-none-manylinux2014_x86_64.whl.metadata (1.5 kB)
+Requirement already satisfied: numpy>=2 in /usr/local/lib/python3.12/site-packages (from opencv-python->-r /workspace/run/ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite/requirements.txt (line 1)) (2.2.6)
+Downloading opencv_python-4.13.0.90-cp37-abi3-manylinux_2_28_x86_64.whl (72.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 72.9/72.9 MB 48.7 MB/s eta 0:00:00
+Downloading imageio_ffmpeg-0.6.0-py3-none-manylinux2014_x86_64.whl (29.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 29.5/29.5 MB 57.9 MB/s eta 0:00:00
+Installing collected packages: opencv-python, imageio-ffmpeg
+
+Successfully installed imageio-ffmpeg-0.6.0 opencv-python-4.13.0.90
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.

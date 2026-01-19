@@ -1,26 +1,15 @@
-# -----------------------------------------------------------------------------
-# constraints.txt — stability pins
-# Everything is installed with: pip install -c constraints.txt ...
-# -----------------------------------------------------------------------------
-
-# OpenCV 4.12 wants numpy >=2,<2.3 — 2.2.6 has been stable for you
+# Keep pip happy with common wheels
 numpy==2.2.6
 
-# Keep HF tooling stable and compatible with most transformers ranges
+# Avoid surprise hf hub major jumps (you already like this)
 huggingface-hub==0.36.0
 
-# Only needed if you ever add comfy-cli back in (it requires click<=8.1.8)
-click==8.1.8
+# Click pin if you still install comfy-cli anywhere
+click<=8.1.8
 
-# Lock torch stack so node requirements can't silently replace it.
-# These must match what you install in the Dockerfile.
-torch==2.10.0.dev20251114+cu128
-torchvision==0.25.0.dev20251118+cu128
+# Optional: keep opencv/numpy compatibility stable
+opencv-python-headless==4.12.0.88
 
-torchsde==0.2.6
-
-# Optional: you can pin these if you want fewer surprises, but it's not required:
-# opencv-python-headless==4.12.0.88
-# kornia==0.8.2
-# scipy==1.15.?
-# Pillow==11.?
+# If you use kornia/scipy a lot:
+kornia==0.8.2
+scipy==1.17.0
