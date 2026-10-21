@@ -1,107 +1,155 @@
-FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+# syntax=docker/dockerfile:1.7
+
+ARG CUDA_BASE_IMAGE=nvidia/cuda:13.0.3-cudnn-devel-ubuntu24.04
+FROM ${CUDA_BASE_IMAGE} AS final
+
+ARG CUDA_VARIANT=cu130
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu130
+ARG TORCH_CUDA_PREFIX=13.0
+ARG CUPY_PACKAGE=cupy-cuda13x
+ARG COMFYUI_REF
+ARG COMFYUI_REQUESTED_REF=unknown
+ARG COMFYUI_VERSION=unknown
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_INPUT=1 \
     PIP_PREFER_BINARY=1 \
-    VENV=/opt/venv
+    HF_XET_HIGH_PERFORMANCE=1 \
+    VENV=/opt/venv \
+    COMFY_APP=/opt/ComfyUI \
+    COMFYUI_PATH=/opt/ComfyUI \
+    COMFY_STATE=/workspace/ComfyUI \
+    COMFY_HOME=/workspace/ComfyUI
 
-# ---- OS + Python 3.12 + tooling ----
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-      python3.12 python3.12-venv python3.12-dev \
+      python3.12 python3.12-venv python3.12-dev python3-pip \
       git git-lfs curl ca-certificates jq \
       build-essential gcc g++ cmake ninja-build pkg-config \
       ffmpeg aria2 rsync tmux unzip wget vim less nano \
-      libgl1 libglib2.0-0 \
-      gcc-12 g++-12 \
+      libgl1 libglib2.0-0 libgoogle-perftools4 \
       openssh-server \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /run/sshd \
+    && mkdir -p /run/sshd /var/run/sshd /workspace /workspace/logs \
     && git lfs install --system \
     && python3.12 -m venv "${VENV}"
 
 ENV PATH="${VENV}/bin:${PATH}"
 
-# ---- pip tooling (keep it sane) ----
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -U "pip<25.2" setuptools wheel
-
-# ---- Constraints: copy early so ALL subsequent pip installs are constrained ----
+# The selected CUDA profile supplies a small set of binary/ABI guardrails.
+# Fast-moving application packages (HF/Transformers/etc.) are intentionally
+# not frozen here; modern custom nodes must be able to move that layer forward.
 COPY pip.conf /etc/pip.conf
-COPY constraints.txt /opt/constraints.txt
-ENV PIP_CONSTRAINT=/opt/constraints.txt
-# Optional extra enforcement for builds that spawn isolated envs:
-ENV PIP_BUILD_CONSTRAINT=/opt/constraints.txt
+COPY constraints /opt/constraints.d
+RUN cp "/opt/constraints.d/${CUDA_VARIANT}.txt" /opt/constraints.txt \
+    && echo "== Active image constraints (${CUDA_VARIANT}) ==" \
+    && cat /opt/constraints.txt
 
-# ---- Torch stack FIRST (pinned, cu128 nightly) ----
-ARG TORCH_INDEX="https://download.pytorch.org/whl/nightly/cu128"
-ARG TORCH_VER="2.10.0.dev20251202+cu128"
-ARG TORCHVISION_VER="0.25.0.dev20251202+cu128"
-ARG TORCHAUDIO_VER="2.10.0.dev20251202+cu128"
+ENV PIP_CONSTRAINT=/opt/constraints.txt \
+    PIP_BUILD_CONSTRAINT=/opt/constraints.txt \
+    CUDA_VARIANT=${CUDA_VARIANT}
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir \
-      --index-url "${TORCH_INDEX}" \
-      "torch==${TORCH_VER}" \
-      "torchvision==${TORCHVISION_VER}" \
-      "torchaudio==${TORCHAUDIO_VER}"
-
-# ---- Base runtime libs you commonly need (keep broad) ----
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir \
-      huggingface_hub==0.36.0 \
-      pyyaml tqdm pillow \
-      opencv-python-headless==4.12.0.88
-
-# ---- ComfyUI clone ----
-ARG COMFYUI_REF="v0.9.2"
-RUN git clone https://github.com/comfyanonymous/ComfyUI.git /workspace/ComfyUI \
-    && cd /workspace/ComfyUI \
-    && git checkout "${COMFYUI_REF}"
-
-WORKDIR /workspace/ComfyUI
-
-# Strip torch/torchvision/torchaudio from ComfyUI requirements (we install torch separately/pinned)
-RUN python - <<'PY'
-import re, pathlib
-
-src = pathlib.Path("requirements.txt")
-dst = pathlib.Path("/tmp/requirements.notorch.txt")
-
-out = []
-for line in src.read_text().splitlines():
-    s = line.strip()
-    if not s or s.startswith("#"):
-        out.append(line); continue
-    if re.match(r"^(torch|torchvision|torchaudio)(\b|==|>=|<=|~=|!=|<|>)", s):
-        continue
-    out.append(line)
-
-dst.write_text("\n".join(out) + "\n")
-print(f"Wrote {dst} (removed torch/vision/audio)")
+    pip install --upgrade "pip<25.2" "setuptools>=66.1,<82" "wheel>=0.38" \
+    && pip install --index-url "${TORCH_INDEX_URL}" \
+         torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+    && python - <<PY
+import torch
+expected = "${TORCH_CUDA_PREFIX}"
+actual = torch.version.cuda or ""
+print("torch:", torch.__version__)
+print("torch CUDA:", actual)
+assert actual.startswith(expected), (actual, expected)
 PY
 
-# Install remaining requirements under constraints
+# COMFYUI_REF is resolved to an immutable commit SHA by the build script.
+RUN git init "${COMFY_APP}" \
+    && git -C "${COMFY_APP}" remote add origin https://github.com/Comfy-Org/ComfyUI.git \
+    && git -C "${COMFY_APP}" fetch --depth=1 origin "${COMFYUI_REF}" \
+    && git -C "${COMFY_APP}" checkout --detach FETCH_HEAD \
+    && git -C "${COMFY_APP}" rev-parse HEAD | tee /opt/comfyui-commit.txt
+
+WORKDIR ${COMFY_APP}
+
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -c /opt/constraints.txt -r /tmp/requirements.notorch.txt
+    pip install -r requirements.txt \
+    && pip install \
+         "huggingface_hub>=1.22.0" \
+         "transformers>=5.5" \
+         hf_transfer \
+         onnxruntime-gpu \
+         "${CUPY_PACKAGE}" \
+         watchdog \
+         opencv-python==4.12.0.88
 
-# Expose ports
+# Both CUDA variants are intended to be workload-neutral. Assert the native
+# Krea2 and MiniMax H3 capabilities that let pod-runtime choose the workload at
+# launch rather than forcing model-family-specific Docker images.
+RUN test -f "${COMFY_APP}/comfy/text_encoders/krea2.py" \
+    && test -f "${COMFY_APP}/comfy_extras/nodes_minimax_h3.py" \
+    && python - <<'PY'
+from importlib.metadata import version
+from packaging.version import Version
+import onnxruntime as ort
 
+hub = Version(version("huggingface-hub"))
+transformers = Version(version("transformers"))
+assert hub >= Version("1.22.0"), hub
+assert transformers >= Version("5.5"), transformers
+providers = ort.get_available_providers()
+assert "CUDAExecutionProvider" in providers, providers
+print("huggingface-hub:", hub)
+print("transformers:", transformers)
+print("onnxruntime providers:", providers)
+PY
+
+RUN python -m pip check \
+    && python - <<'PY' > /opt/image-stack.txt
+from importlib.metadata import PackageNotFoundError, version
+packages = [
+    "torch", "torchvision", "torchaudio", "numpy", "Pillow",
+    "opencv-python", "comfy-aimdo", "comfy-kitchen",
+    "huggingface-hub", "transformers", "tokenizers", "safetensors",
+    "onnxruntime-gpu",
+]
+for package in packages:
+    try:
+        print(f"{package:20s} {version(package)}")
+    except PackageNotFoundError:
+        print(f"{package:20s} <not installed>")
+PY
+
+RUN mkdir -p \
+      /workspace/ComfyUI/custom_nodes \
+      /workspace/ComfyUI/models \
+      /workspace/ComfyUI/input \
+      /workspace/ComfyUI/output \
+      /workspace/ComfyUI/user \
+      /workspace/ComfyUI/cache \
+      /workspace/logs
+
+COPY src/start_script.sh /opt/comfyui-inference/start_script.sh
+RUN chmod +x /opt/comfyui-inference/start_script.sh
+
+WORKDIR /workspace
 EXPOSE 22 8188 8288 8388 8888
+ENTRYPOINT ["/opt/comfyui-inference/start_script.sh"]
 
-# Prepare for ssh 
-RUN mkdir -p /var/run/sshd
+# Volatile metadata stays at the end so changing labels does not invalidate the
+# expensive CUDA/Python/ComfyUI dependency layers above.
+ARG BUILD_DATE=unknown
+ARG VCS_REF=unknown
+ARG IMAGE_VERSION=dev
 
-# Make sure /workspace exists (Vast will usually mount over it)
-RUN mkdir -p /workspace
-
-# Copy the upscaler
-COPY 4xLSDIR.pth /
-
-# Thin startup wrapper – this is where you’ll hook your big shell later
-COPY src/start_script.sh /start_script.sh
-RUN chmod +x /start_script.sh
-
-ENTRYPOINT ["/start_script.sh"]
+LABEL org.opencontainers.image.title="comfyui-inference" \
+      org.opencontainers.image.description="Headless ComfyUI inference runtime with CUDA 12.8 and CUDA 13.0 build profiles" \
+      org.opencontainers.image.source="https://github.com/markwelshboy/comfyui-inference" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      io.markwelshboy.comfy.cuda_variant="${CUDA_VARIANT}" \
+      io.markwelshboy.comfy.comfyui_ref="${COMFYUI_REF}" \
+      io.markwelshboy.comfy.comfyui_requested_ref="${COMFYUI_REQUESTED_REF}" \
+      io.markwelshboy.comfy.comfyui_version="${COMFYUI_VERSION}"

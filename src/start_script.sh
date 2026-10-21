@@ -1,40 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Repo that holds .env, helpers.sh, start.sh
-RUNTIME_REPO_URL="${RUNTIME_REPO_URL:-https://github.com/markwelshboy/pod-runtime.git}"
-RUNTIME_DIR="${RUNTIME_DIR:-/workspace/pod-runtime}"
+mkdir -p /workspace /workspace/logs
 
-mkdir -p /workspace
+runtime_dir="${POD_RUNTIME_DIR:-/workspace/pod-runtime}"
+runtime_repo="${POD_RUNTIME_REPO:-https://github.com/markwelshboy/pod-runtime.git}"
+runtime_ref="${POD_RUNTIME_REF:-main}"
+runtime_entrypoint="${POD_RUNTIME_ENTRYPOINT:-start.sh}"
 
-if [ -d "$RUNTIME_DIR/.git" ]; then
-  echo "[start_script] Updating runtime repo in $RUNTIME_DIR..."
-  git -C "$RUNTIME_DIR" pull --rebase --autostash || true
+if [[ -d "${runtime_dir}/.git" ]]; then
+  echo "[bootstrap] Updating pod-runtime (${runtime_ref})..."
+  git -C "${runtime_dir}" remote set-url origin "${runtime_repo}" || true
 else
-  echo "[start_script] Cloning runtime repo into $RUNTIME_DIR..."
-  git clone --depth 1 "$RUNTIME_REPO_URL" "$RUNTIME_DIR"
+  echo "[bootstrap] Initializing pod-runtime checkout in ${runtime_dir}..."
+  rm -rf "${runtime_dir}"
+  mkdir -p "${runtime_dir}"
+  git -C "${runtime_dir}" init
+  git -C "${runtime_dir}" remote add origin "${runtime_repo}"
 fi
 
-cd "$RUNTIME_DIR"
+git -C "${runtime_dir}" fetch --depth=1 origin "${runtime_ref}"
+git -C "${runtime_dir}" checkout --detach FETCH_HEAD
 
-# install small helpers into /root
-# Capture repo root dynamically
-TMP="/root/.bashrc.temp"
-# Copy the repo version
-cp .bashrc "$TMP"
-# Replace the placeholder
-sed -i "s|REPO_ROOT=<CHANGEME>|REPO_ROOT=\"$RUNTIME_DIR\"|" "$TMP"
-# Install into place
-install -m 0644 "$TMP" /root/.bashrc
-# Clean up
-rm -f "$TMP"
+export POD_RUNTIME_DIR="${runtime_dir}"
 
-install -m 0644 .bash_functions /root/.bash_functions
-install -m 0644 .bash_aliases /root/.bash_aliases
+entrypoint_path="${POD_RUNTIME_DIR}/${runtime_entrypoint}"
+[[ -f "${entrypoint_path}" ]] || {
+  echo "[fatal] pod-runtime entrypoint not found: ${entrypoint_path}" >&2
+  exit 1
+}
+chmod +x "${entrypoint_path}" || true
 
-if [ ! -x ./start.sh ]; then
-  chmod +x ./start.sh
-fi
-
-echo "[start_script] Handing off to runtime start.sh..."
-exec ./start.sh
+echo "[bootstrap] CUDA profile: ${CUDA_VARIANT:-unknown}"
+echo "[bootstrap] pod-runtime: ${runtime_ref} -> ${runtime_entrypoint}"
+exec "${entrypoint_path}"
