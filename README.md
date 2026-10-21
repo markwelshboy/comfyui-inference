@@ -83,18 +83,44 @@ The image owns the stable foundation:
 - workflow and persistent-state setup
 - ComfyUI launch policy
 
-The image entrypoint fetches `pod-runtime` and defaults to `start.sh`. It can be overridden with:
+The image entrypoint fetches `pod-runtime` and defaults to its normal `start.sh`. During convergence, the matching staged runtime work is on:
 
 ```text
-POD_RUNTIME_REF=<branch-or-ref>
-POD_RUNTIME_ENTRYPOINT=start.minimax.sh
+pod-runtime branch: agent/inference-runtime-profiles
+entrypoint:         start.inference.sh
 ```
+
+For a Krea2/RMBG staging pod:
+
+```text
+POD_RUNTIME_REF=agent/inference-runtime-profiles
+POD_RUNTIME_ENTRYPOINT=start.inference.sh
+COMFY_WORKLOAD=krea2
+```
+
+For a MiniMax staging pod on the cu130 image:
+
+```text
+POD_RUNTIME_REF=agent/inference-runtime-profiles
+POD_RUNTIME_ENTRYPOINT=start.inference.sh
+COMFY_WORKLOAD=minimax
+```
+
+For image-edit/RMBG-focused testing:
+
+```text
+POD_RUNTIME_REF=agent/inference-runtime-profiles
+POD_RUNTIME_ENTRYPOINT=start.inference.sh
+COMFY_WORKLOAD=imagedit
+```
+
+The existing production `pod-runtime/main` and legacy MiniMax/Krea launchers are not modified by this staging flow.
 
 Longer term, Krea2 / MiniMax / image-edit should be runtime workload profiles rather than separate Docker image families.
 
 ## Constraints policy
 
-`constraints/cu128.txt` and `constraints/cu130.txt` pin the CUDA/PyTorch and other binary-sensitive pieces. They intentionally do not pin `huggingface-hub`, `transformers`, `tokenizers`, `diffusers`, or `accelerate` to old generations.
+`constraints/cu128.txt` and `constraints/cu130.txt` pin the CUDA/PyTorch and other binary-sensitive pieces. They intentionally do not duplicate ComfyUI's own exact application dependencies and do not pin `huggingface-hub`, `transformers`, `tokenizers`, `diffusers`, or `accelerate` to old generations.
 
 The Dockerfile currently establishes these minimum application-layer floors:
 
@@ -103,7 +129,7 @@ huggingface-hub >= 1.22.0
 transformers    >= 5.5
 ```
 
-This is specifically intended to avoid the old Krea image's `huggingface-hub==0.36.0` / Transformers 4.x dead-end while still letting custom-node requirements participate in dependency resolution.
+This is specifically intended to avoid the old Krea image's `huggingface-hub==0.36.0` / Transformers 4.x dead-end while still letting ComfyUI and custom-node requirements participate in dependency resolution.
 
 ## Branches
 
