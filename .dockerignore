@@ -1,0 +1,6 @@
+.git
+.gitignore
+4xLSDIR.pth
+__pycache__/
+*.pyc
+*.log
